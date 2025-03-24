@@ -1,0 +1,12 @@
+[project]
+name = "23andmefamilytreescraper"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.13.3",
+    "requests>=2.32.3",
+    "rich>=13.9.4",
+    "selenium>=4.30.0",
+]
