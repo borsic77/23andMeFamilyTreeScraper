@@ -5,15 +5,63 @@ from typing import Dict, List, Optional, Tuple, Set
 
 DATA_DIR = Path(__file__).parent / ".." / "data"
 
+def load_data(data_dir: Path) -> Tuple[List[dict], List[dict], List[dict]]:
+    """
+    Load tree, annotations, and relatives data from the given directory.
+
+    Args:
+        data_dir (Path): The directory containing the data files.
+
+    Returns:
+        Tuple[List[dict], List[dict], List[dict]]: Lists of tree nodes, annotations, and relatives.
+    """
+    with open(data_dir / "tree.json") as f:
+        tree_nodes = json.load(f)
+    with open(data_dir / "annotations.json") as f:
+        annotations = json.load(f)
+    with open(data_dir / "relatives_10.json") as f:
+        relatives = json.load(f)
+    return tree_nodes, annotations, relatives
+
+def normalize_tree_nodes(tree_nodes: List[dict]) -> Dict[str, dict]:
+    """
+    Normalize tree node identifiers by preferring profile_id over raw id, and remap relationships.
+
+    Args:
+        tree_nodes (List[dict]): Raw tree node data.
+
+    Returns:
+        Dict[str, dict]: A dictionary of normalized tree nodes indexed by consistent IDs.
+    """
+    id_to_profile = {}
+    profile_to_id = {}
+    for node in tree_nodes:
+        pid = node.get("profile_id")
+        nid = node.get("id")
+        if pid:
+            profile_to_id[pid] = nid
+            id_to_profile[nid] = pid
+
+    tree_by_id: Dict[str, dict] = {}
+    for node in tree_nodes:
+        key = node.get("profile_id") or node["id"]
+        if not key:
+            continue
+        normalized_node = dict(node)  # shallow copy
+        normalized_node["id"] = key
+
+        # Remap partner_ids and parent_ids to profile_ids when possible
+        normalized_node["parent_ids"] = [
+            id_to_profile.get(pid, pid) for pid in node.get("parent_ids", [])
+        ]
+        normalized_node["partner_ids"] = [
+            id_to_profile.get(pid, pid) for pid in node.get("partner_ids", [])
+        ]
+        tree_by_id[key] = normalized_node
+    return tree_by_id
+
 # Load data
-with open(DATA_DIR / "tree.json") as f:
-    tree_nodes = json.load(f)
-
-with open(DATA_DIR / "annotations.json") as f:
-    annotations = json.load(f)
-
-with open(DATA_DIR / "relatives_10.json") as f:
-    relatives = json.load(f)
+tree_nodes, annotations, relatives = load_data(DATA_DIR)
 
 # First pass: build ID maps
 id_to_profile = {}
@@ -26,22 +74,7 @@ for node in tree_nodes:
         id_to_profile[nid] = pid
 
 # Second pass: normalize IDs
-tree_by_id: Dict[str, dict] = {}
-for node in tree_nodes:
-    key = node.get("profile_id") or node["id"]
-    if not key:
-        continue
-    normalized_node = dict(node)  # shallow copy
-    normalized_node["id"] = key
-
-    # Remap partner_ids and parent_ids to profile_ids when possible
-    normalized_node["parent_ids"] = [
-        id_to_profile.get(pid, pid) for pid in node.get("parent_ids", [])
-    ]
-    normalized_node["partner_ids"] = [
-        id_to_profile.get(pid, pid) for pid in node.get("partner_ids", [])
-    ]
-    tree_by_id[key] = normalized_node
+tree_by_id = normalize_tree_nodes(tree_nodes)
 
 anno_by_id: Dict[str, dict] = {}
 for v in annotations:
