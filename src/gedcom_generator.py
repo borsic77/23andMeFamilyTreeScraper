@@ -60,6 +60,23 @@ def normalize_tree_nodes(tree_nodes: List[dict]) -> Dict[str, dict]:
         tree_by_id[key] = normalized_node
     return tree_by_id
 
+def map_annotations(annotations: List[dict]) -> Dict[str, dict]:
+    """
+    Create a dictionary mapping profile IDs (or tree node IDs) to annotation data.
+
+    Args:
+        annotations (List[dict]): A list of annotation entries.
+
+    Returns:
+        Dict[str, dict]: Mapping from ID to annotation.
+    """
+    anno_by_id: Dict[str, dict] = {}
+    for v in annotations:
+        key = v.get("profile_id") or v["tree_node_id"]
+        if key:
+            anno_by_id[key] = v
+    return anno_by_id
+
 # Load data
 tree_nodes, annotations, relatives = load_data(DATA_DIR)
 
@@ -76,11 +93,7 @@ for node in tree_nodes:
 # Second pass: normalize IDs
 tree_by_id = normalize_tree_nodes(tree_nodes)
 
-anno_by_id: Dict[str, dict] = {}
-for v in annotations:
-    key = v.get("profile_id") or v["tree_node_id"]
-    if key:
-        anno_by_id[key] = v
+anno_by_id = map_annotations(annotations)
 
 profile_id_to_tree_id: Dict[str, str] = {
     v["profile_id"]: k for k, v in tree_by_id.items() if v.get("profile_id")
