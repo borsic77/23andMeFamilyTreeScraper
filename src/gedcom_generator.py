@@ -107,16 +107,19 @@ def format_place(loc_dict):
         filter(None, [loc_dict.get("city"), loc_dict.get("state"), loc_dict.get("county"), loc_dict.get("country")])
     )
 
-def build_individual_entry(node_id: str, node: dict, annotation: Optional[dict]) -> List[str]:
-    lines = [f"0 {gedcom.get_gedcom_id(node_id)} INDI"]
-    fname = (annotation.get("first_name") if annotation else None) or node.get("first_name")
-    lname = (annotation.get("last_name") if annotation else None) or node.get("last_name")
-    sex = (annotation.get("sex") if annotation else None) or node.get("sex")
-    if fname or lname:
-        lines.append(f"1 NAME {fname or ''} /{lname or ''}/")
-    if sex:
-        lines.append(f"1 SEX {sex[0].upper()}")
-    if annotation and annotation.get("birth_occurrence"):
+def _format_name(fname: Optional[str], lname: Optional[str]) -> Optional[str]:
+    if not fname and not lname:
+        return None
+    return f"1 NAME {fname or ''} /{lname or ''}/"
+
+def _format_sex(sex: Optional[str]) -> Optional[str]:
+    if not sex:
+        return None
+    return f"1 SEX {sex[0].upper()}"
+
+def _format_birth(annotation: dict) -> List[str]:
+    lines = []
+    if "birth_occurrence" in annotation:
         bdate = format_date(annotation["birth_occurrence"])
         if bdate:
             lines.append("1 BIRT")
@@ -124,7 +127,11 @@ def build_individual_entry(node_id: str, node: dict, annotation: Optional[dict])
             plac = format_place(annotation["birth_occurrence"])
             if plac:
                 lines.append(f"2 PLAC {plac}")
-    if annotation and annotation.get("death_occurrence"):
+    return lines
+
+def _format_death(annotation: dict) -> List[str]:
+    lines = []
+    if "death_occurrence" in annotation:
         ddate = format_date(annotation["death_occurrence"])
         if ddate:
             lines.append("1 DEAT")
@@ -132,16 +139,42 @@ def build_individual_entry(node_id: str, node: dict, annotation: Optional[dict])
             plac = format_place(annotation["death_occurrence"])
             if plac:
                 lines.append(f"2 PLAC {plac}")
+    return lines
 
-    if annotation and annotation.get("residence_occurrence"):
+def _format_residence(annotation: dict) -> List[str]:
+    lines = []
+    if "residence_occurrence" in annotation:
         plac = format_place(annotation["residence_occurrence"])
         if plac:
             lines.append("1 RESI")
             lines.append(f"2 PLAC {plac}")
+    return lines
 
-    if node.get("profile_image_url"):
-        lines.append("1 OBJE")
-        lines.append(f"2 FILE {node['profile_image_url']}")
+def _format_image(node: dict) -> List[str]:
+    if "profile_image_url" in node:
+        return ["1 OBJE", f"2 FILE {node['profile_image_url']}"]
+    return []
+
+def build_individual_entry(node_id: str, node: dict, annotation: Optional[dict]) -> List[str]:
+    lines = [f"0 {gedcom.get_gedcom_id(node_id)} INDI"]
+    fname = (annotation.get("first_name") if annotation else None) or node.get("first_name")
+    lname = (annotation.get("last_name") if annotation else None) or node.get("last_name")
+    sex = (annotation.get("sex") if annotation else None) or node.get("sex")
+    
+    name_line = _format_name(fname, lname)
+    if name_line:
+        lines.append(name_line)
+
+    sex_line = _format_sex(sex)
+    if sex_line:
+        lines.append(sex_line)
+
+    if annotation:
+        lines.extend(_format_birth(annotation))
+        lines.extend(_format_death(annotation))
+        lines.extend(_format_residence(annotation))
+
+    lines.extend(_format_image(node))
 
     for fam_id, husb_id, wife_id, children in gedcom.family_structs:
         if node_id in children:
