@@ -350,6 +350,13 @@ class GedcomExporter:
         sex_line = self._format_sex(sex)
         if sex_line:
             lines.append(sex_line)
+        if annotation:
+            if annotation.get("deceased") and not annotation.get("death_occurrence"):
+                lines.append("1 DEAT")
+            if annotation.get("is_adopted"):
+                lines.append("1 ADOP Y")
+            if annotation.get("married_name"):
+                lines.append(f"1 ALIA /{annotation['married_name']}/")
 
         if annotation:
             lines.extend(self._format_birth(annotation))
