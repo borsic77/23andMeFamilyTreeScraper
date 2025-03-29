@@ -122,11 +122,11 @@ def _format_birth(annotation: dict) -> List[str]:
     if "birth_occurrence" in annotation:
         bdate = format_date(annotation["birth_occurrence"])
         if bdate:
-            lines.append("1 BIRT")
-            lines.append(f"2 DATE {bdate}")
+            lines.append(add_line(1, "BIRT"))
+            lines.append(add_line(2, "DATE", bdate))
             plac = format_place(annotation["birth_occurrence"])
             if plac:
-                lines.append(f"2 PLAC {plac}")
+                lines.append(add_line(2, "PLAC", plac))
     return lines
 
 def _format_death(annotation: dict) -> List[str]:
@@ -134,11 +134,11 @@ def _format_death(annotation: dict) -> List[str]:
     if "death_occurrence" in annotation:
         ddate = format_date(annotation["death_occurrence"])
         if ddate:
-            lines.append("1 DEAT")
-            lines.append(f"2 DATE {ddate}")
+            lines.append(add_line(1, "DEAT"))
+            lines.append(add_line(2, "DATE", ddate))
             plac = format_place(annotation["death_occurrence"])
             if plac:
-                lines.append(f"2 PLAC {plac}")
+                lines.append(add_line(2, "PLAC", plac))
     return lines
 
 def _format_residence(annotation: dict) -> List[str]:
@@ -146,13 +146,13 @@ def _format_residence(annotation: dict) -> List[str]:
     if "residence_occurrence" in annotation:
         plac = format_place(annotation["residence_occurrence"])
         if plac:
-            lines.append("1 RESI")
-            lines.append(f"2 PLAC {plac}")
+            lines.append(add_line(1, "RESI"))
+            lines.append(add_line(2, "PLAC", plac))
     return lines
 
 def _format_image(node: dict) -> List[str]:
     if "profile_image_url" in node:
-        return ["1 OBJE", f"2 FILE {node['profile_image_url']}"]
+        return [add_line(1, "OBJE"), add_line(2, "FILE", node["profile_image_url"])]
     return []
 
 def build_individual_entry(node_id: str, node: dict, annotation: Optional[dict]) -> List[str]:
@@ -250,6 +250,9 @@ def build_parent_based_families(tree_nodes: Dict[str, dict]) -> List[str]:
 
 def build_family_entries(tree_nodes: Dict[str, dict]) -> List[str]:
     return build_partner_families(tree_nodes) + build_parent_based_families(tree_nodes)
+
+def add_line(level: int, tag: str, value: Optional[str] = None) -> str:
+    return f"{level} {tag}" if value is None else f"{level} {tag} {value}"
 
 def export_gedcom(output_path: Path):
     lines: List[str] = [
