@@ -145,6 +145,40 @@ def navigate_to_tree(driver: webdriver.Chrome) -> None:
     time.sleep(5)
     print("[bold yellow]Inspecting tree page completed.[/bold yellow]")
 
+def run_scraper(export_dir: Path) -> None:
+    """Run the full scraping workflow and save output to the given directory."""
+    email = input("23andMe Email: ")
+    password = getpass.getpass("23andMe Password: ")
+
+    driver = init_browser(headless=False)
+    try:
+        if login(driver, email, password):
+            navigate_to_tree(driver)
+            profile_id = extract_profile_id(driver)
+            print(f"[bold green]Using profile ID:[/bold green] {profile_id}")
+
+            session = create_authenticated_session(driver)
+
+            export_dir.mkdir(parents=True, exist_ok=True)
+            for limit in [10]:
+                data = session.get(
+                    f"https://you.23andme.com/p/{profile_id}/family/relatives/ajax/?limit={limit}"
+                ).json()
+                (export_dir / f"relatives_{limit}.json").write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+
+            for name, url in {
+                "tree": f"https://you.23andme.com/p/{profile_id}/family/tree/ajax/?health=false",
+                "annotations": f"https://you.23andme.com/p/{profile_id}/family/tree/annotations/"
+            }.items():
+                data = session.get(url).json()
+                (export_dir / f"{name}.json").write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+    finally:
+        driver.quit()
+
 
 if __name__ == "__main__":
     email = input("23andMe Email: ")
@@ -165,3 +199,4 @@ if __name__ == "__main__":
             input("\n[bold cyan]Press Enter to close the browser...[/bold cyan]")
     finally:
         driver.quit()
+
