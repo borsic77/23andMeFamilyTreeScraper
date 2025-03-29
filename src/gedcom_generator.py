@@ -155,7 +155,7 @@ def build_individual_entry(node_id: str, node: dict, annotation: Optional[dict])
 
     return lines
 
-def build_family_entries(tree_nodes: Dict[str, dict]) -> List[str]:
+def build_partner_families(tree_nodes: Dict[str, dict]) -> List[str]:
     fam_lines = []
     seen: Set[Tuple[str, str]] = set()
     for node_id, node in tree_nodes.items():
@@ -186,10 +186,12 @@ def build_family_entries(tree_nodes: Dict[str, dict]) -> List[str]:
                 fam_lines.append(f"1 HUSB {gedcom.get_gedcom_id(node_id)}")
                 fam_lines.append(f"1 WIFE {gedcom.get_gedcom_id(partner_id)}")
             for child in children:
-                if child not in children:
-                    fam_lines.append(f"1 CHIL {gedcom.get_gedcom_id(child)}")
+                fam_lines.append(f"1 CHIL {gedcom.get_gedcom_id(child)}")
             gedcom.family_structs.append((fid, node_id, partner_id, children))
+    return fam_lines
 
+def build_parent_based_families(tree_nodes: Dict[str, dict]) -> List[str]:
+    fam_lines = []
     seen_families: Set[Tuple[str, str]] = set()
     for node_id, node in tree_nodes.items():
         parent_ids = node.get("parent_ids", [])
@@ -204,11 +206,17 @@ def build_family_entries(tree_nodes: Dict[str, dict]) -> List[str]:
         fam_lines.append(f"0 {fid} FAM")
         fam_lines.append(f"1 HUSB {gedcom.get_gedcom_id(pid1)}")
         fam_lines.append(f"1 WIFE {gedcom.get_gedcom_id(pid2)}")
-        for cid, cnode in tree_nodes.items():
-            if set(cnode.get("parent_ids", [])) == set(family_key):
-                fam_lines.append(f"1 CHIL {gedcom.get_gedcom_id(cid)}")
-        gedcom.family_structs.append((fid, pid1, pid2, [cid for cid, cnode in tree_nodes.items() if set(cnode.get("parent_ids", [])) == set(family_key)]))
+        children = [
+            cid for cid, cnode in tree_nodes.items()
+            if set(cnode.get("parent_ids", [])) == set(family_key)
+        ]
+        for cid in children:
+            fam_lines.append(f"1 CHIL {gedcom.get_gedcom_id(cid)}")
+        gedcom.family_structs.append((fid, pid1, pid2, children))
     return fam_lines
+
+def build_family_entries(tree_nodes: Dict[str, dict]) -> List[str]:
+    return build_partner_families(tree_nodes) + build_parent_based_families(tree_nodes)
 
 def export_gedcom(output_path: Path):
     lines: List[str] = [
