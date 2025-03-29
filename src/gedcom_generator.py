@@ -214,14 +214,16 @@ class GedcomExporter:
             List[str]: List of GEDCOM lines for birth information.
         """
         lines = []
-        if "birth" in annotation:
-            birth_date = self.format_date(annotation["birth"].get("date"))
-            birth_place = self.format_place(annotation["birth"].get("place"))
-            if birth_date:
-                lines.append(f"1 BIRT")
-                lines.append(f"2 DATE {birth_date}")
-            if birth_place:
-                lines.append(f"2 PLAC {birth_place}")
+        occ = annotation.get("birth_occurrence")
+        if occ:
+            date_str = self.format_date_from_fields(occ)
+            place_str = self.format_place_from_fields(occ)
+            if date_str or place_str:
+                lines.append("1 BIRT")
+                if date_str:
+                    lines.append(f"2 DATE {date_str}")
+                if place_str:
+                    lines.append(f"2 PLAC {place_str}")
         return lines
 
     def _format_death(self, annotation: dict) -> List[str]:
@@ -234,14 +236,16 @@ class GedcomExporter:
             List[str]: List of GEDCOM lines for death information.
         """
         lines = []
-        if "death" in annotation:
-            death_date = self.format_date(annotation["death"].get("date"))
-            death_place = self.format_place(annotation["death"].get("place"))
-            if death_date:
-                lines.append(f"1 DEAT")
-                lines.append(f"2 DATE {death_date}")
-            if death_place:
-                lines.append(f"2 PLAC {death_place}")
+        occ = annotation.get("death_occurrence")
+        if occ:
+            date_str = self.format_date_from_fields(occ)
+            place_str = self.format_place_from_fields(occ)
+            if date_str or place_str:
+                lines.append("1 DEAT")
+                if date_str:
+                    lines.append(f"2 DATE {date_str}")
+                if place_str:
+                    lines.append(f"2 PLAC {place_str}")
         return lines
 
     def _format_residence(self, annotation: dict) -> List[str]:
@@ -254,14 +258,16 @@ class GedcomExporter:
             List[str]: List of GEDCOM lines for residence information.
         """
         lines = []
-        if "residence" in annotation:
-            residence_date = self.format_date(annotation["residence"].get("date"))
-            residence_place = self.format_place(annotation["residence"].get("place"))
-            if residence_date:
-                lines.append(f"1 RESI")
-                lines.append(f"2 DATE {residence_date}")
-            if residence_place:
-                lines.append(f"2 PLAC {residence_place}")
+        occ = annotation.get("residence_occurrence")
+        if occ:
+            date_str = self.format_date_from_fields(occ)
+            place_str = self.format_place_from_fields(occ)
+            if date_str or place_str:
+                lines.append("1 RESI")
+                if date_str:
+                    lines.append(f"2 DATE {date_str}")
+                if place_str:
+                    lines.append(f"2 PLAC {place_str}")
         return lines
 
     def _format_image(self, node: dict) -> List[str]:
@@ -301,6 +307,25 @@ class GedcomExporter:
             Optional[str]: The place string for GEDCOM.
         """
         return place_str if place_str else None
+
+    def format_date_from_fields(self, occ: dict) -> Optional[str]:
+        """Format date from 'day', 'month', and 'year' fields in annotation."""
+        day = occ.get("day")
+        month = occ.get("month")
+        year = occ.get("year")
+        if year:
+            try:
+                return datetime(year, month or 1, day or 1).strftime("%d %b %Y") if month and day else \
+                       datetime(year, month or 1, 1).strftime("%b %Y") if month else \
+                       f"{year}"
+            except Exception:
+                return None
+        return None
+
+    def format_place_from_fields(self, occ: dict) -> Optional[str]:
+        """Format place from structured location fields in annotation."""
+        parts = [occ.get("city"), occ.get("county"), occ.get("state"), occ.get("country")]
+        return ", ".join(p for p in parts if p)
 
     def build_individual_entry(self, node_id: str, node: dict, annotation: Optional[dict]) -> List[str]:
         """Build a GEDCOM entry for an individual.
