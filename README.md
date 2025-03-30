@@ -24,13 +24,12 @@ This project lets you scrape your family tree data from 23andMe and convert it i
    ```
 
 3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
    ```
-
-   Or if you're using `uv`:
-   ```bash
+   # If you use uv (recommended)
    uv pip install
+
+   # Or with standard pip:
+   pip install .  # This installs using pyproject.toml metadata
    ```
 
 ## 🚀 Usage
@@ -73,3 +72,21 @@ MIT License. See `LICENSE` file for details.
 ## 🙋‍♂️ Author
 
 Built by Boris Legradic as a personal side project to preserve family history. Contributions welcome!
+
+### Environment setup example with uv
+
+If you are using [`uv`](https://github.com/astral-sh/uv) for fast Python dependency management:
+
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install 
+```
+
+### Or with pip:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install .  
+```
