@@ -14,29 +14,175 @@ from pathlib import Path
 from rich import print
 import getpass
 import json
+from typing import Optional
+
 import requests
+from requests import Response
 
 EXPORT_DIR = Path("23andme_exports")
 EXPORT_DIR.mkdir(exist_ok=True)
 
 
 
-def create_authenticated_session(driver: webdriver.Chrome) -> requests.Session:
-    """Extract cookies from Selenium and create a requests.Session with them."""
+def _seed_session_cookies(driver: webdriver.Chrome) -> requests.Session:
+    """Copy Selenium cookies from the browser to a requests session."""
     session = requests.Session()
-
     for cookie in driver.get_cookies():
-        session.cookies.set(cookie['name'], cookie['value'])
-
-    # Add headers for requests to look like an AJAX call
-    session.headers.update({
-        "User-Agent": driver.execute_script("return navigator.userAgent;"),
-        "Accept": "*/*",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"https://you.23andme.com/family/tree/",
-    })
-
+        cookie_kwargs = {}
+        if cookie.get("domain"):
+            cookie_kwargs["domain"] = cookie["domain"]
+        if cookie.get("path"):
+            cookie_kwargs["path"] = cookie["path"]
+        if cookie.get("secure") is not None:
+            cookie_kwargs["secure"] = cookie["secure"]
+        if cookie.get("expiry"):
+            cookie_kwargs["expires"] = cookie["expiry"]
+        session.cookies.set(cookie["name"], cookie["value"], **cookie_kwargs)
     return session
+
+
+def _apply_default_headers(driver: webdriver.Chrome, session: requests.Session, profile_id: str) -> None:
+    """Populate session headers so requests look like authenticated AJAX calls."""
+    ajax_headers = {
+        "User-Agent": driver.execute_script("return navigator.userAgent;"),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-Requested-With": "XMLHttpRequest",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        "Referer": f"https://you.23andme.com/p/{profile_id}/family/tree/",
+    }
+    session.headers.update(ajax_headers)
+
+    csrf_token = None
+    xsrf_token = None
+    for name, value in session.cookies.get_dict().items():
+        lower = name.lower()
+        if "csrftoken" in lower and not csrf_token:
+            csrf_token = value
+        if "xsrf" in lower and not xsrf_token:
+            xsrf_token = value
+
+    if csrf_token:
+        session.headers.setdefault("X-CSRFToken", csrf_token)
+    if xsrf_token:
+        session.headers.setdefault("X-XSRF-TOKEN", xsrf_token)
+
+
+def create_authenticated_session(driver: webdriver.Chrome, profile_id: str) -> requests.Session:
+    """Extract cookies from Selenium and create a requests.Session with them."""
+    session = _seed_session_cookies(driver)
+    _apply_default_headers(driver, session, profile_id)
+    return session
+
+
+def _fetch_json(session: requests.Session, url: str, description: str) -> dict:
+    """Fetch a JSON response and raise a helpful exception if parsing fails."""
+    response: Response = session.get(url)
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as error:
+        raise RuntimeError(
+            f"Failed to fetch {description}: HTTP {response.status_code} from {url}"
+        ) from error
+
+    content_type = response.headers.get("Content-Type", "")
+    if "json" not in content_type.lower():
+        snippet = response.text[:200].strip()
+        raise RuntimeError(
+            f"Expected JSON while fetching {description} but got {content_type or 'unknown content-type'}.\n"
+            f"Response snippet: {snippet}"
+        )
+
+    try:
+        return response.json()
+    except json.JSONDecodeError as error:
+        snippet = response.text[:200].strip()
+        raise RuntimeError(
+            f"Could not decode JSON for {description}. Response snippet: {snippet}"
+        ) from error
+
+
+def _fetch_json_via_browser(driver: webdriver.Chrome, url: str, description: str) -> dict:
+    """Execute fetch inside the browser context to leverage existing authenticated session."""
+    script = """
+    const url = arguments[0];
+    const callback = arguments[arguments.length - 1];
+
+    fetch(url, {
+        credentials: 'include',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        const contentType = response.headers.get('content-type') || '';
+        return response.text().then(text => {
+            callback({
+                ok: response.ok,
+                status: response.status,
+                statusText: response.statusText,
+                contentType,
+                text
+            });
+        });
+    })
+    .catch(error => {
+        callback({
+            ok: false,
+            error: error ? error.toString() : 'Unknown error'
+        });
+    });
+    """
+
+    result = driver.execute_async_script(script, url)
+    if not isinstance(result, dict):
+        raise RuntimeError(f"Unexpected browser fetch result for {description}: {result}")
+
+    if not result.get("ok"):
+        snippet = (result.get("text") or "").strip()[:200]
+        status = result.get("status")
+        status_text = result.get("statusText") or result.get("error", "Unknown error")
+        raise RuntimeError(
+            f"Browser fetch failed for {description}: {status} {status_text}. Response snippet: {snippet}"
+        )
+
+    content_type = (result.get("contentType") or "").lower()
+    text = result.get("text") or ""
+
+    if "json" not in content_type:
+        snippet = text.strip()[:200]
+        raise RuntimeError(
+            f"Browser fetch expected JSON for {description} but received {content_type or 'unknown content-type'}.\n"
+            f"Response snippet: {snippet}"
+        )
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        snippet = text.strip()[:200]
+        raise RuntimeError(
+            f"Browser fetch could not decode JSON for {description}. Response snippet: {snippet}"
+        ) from error
+
+
+def _fetch_json_with_fallback(
+    session: requests.Session,
+    url: str,
+    description: str,
+    driver: Optional[webdriver.Chrome] = None,
+) -> dict:
+    """Try fetching JSON via requests session, falling back to browser context when needed."""
+    try:
+        return _fetch_json(session, url, description)
+    except RuntimeError as error:
+        if driver is None:
+            raise
+        print(
+            f"[yellow]Session fetch for {description} failed ({error}). Retrying via browser context...[/yellow]"
+        )
+        return _fetch_json_via_browser(driver, url, description)
 
 def init_browser(headless: bool = True) -> webdriver.Chrome:
     """Initialize a Chrome browser with options."""
@@ -92,15 +238,18 @@ def extract_profile_id(driver: webdriver.Chrome) -> str:
     raise ValueError("Could not find profile_id in cookies")
 
 
-def fetch_and_save_relatives(session: requests.Session, profile_id: str, limit: int = 10) -> None:
+def fetch_and_save_relatives(
+    session: requests.Session,
+    profile_id: str,
+    limit: int = 10,
+    *,
+    driver: Optional[webdriver.Chrome] = None,
+) -> None:
     """Fetch relatives data from 23andMe and save it to a JSON file."""
     url = f"https://you.23andme.com/p/{profile_id}/family/relatives/ajax/?limit={limit}"
 
     print(f"[green]Fetching {limit} relatives...[/green]")
-    response = session.get(url)
-    response.raise_for_status()
-
-    data = response.json()
+    data = _fetch_json_with_fallback(session, url, f"{limit} relatives", driver=driver)
 
     filename = f"relatives_{limit}.json"
     with open(filename, "w", encoding="utf-8") as f:
@@ -110,7 +259,12 @@ def fetch_and_save_relatives(session: requests.Session, profile_id: str, limit: 
     print(f"[bold green]Saved to {filename}[/bold green]")
 
 
-def fetch_tree_data(session: requests.Session, profile_id: str) -> None:
+def fetch_tree_data(
+    session: requests.Session,
+    profile_id: str,
+    *,
+    driver: Optional[webdriver.Chrome] = None,
+) -> None:
     """Fetch tree structure and annotations and save as JSON files."""
     base_url = f"https://you.23andme.com/p/{profile_id}/family/tree"
     endpoints = {
@@ -120,9 +274,7 @@ def fetch_tree_data(session: requests.Session, profile_id: str) -> None:
 
     for name, url in endpoints.items():
         print(f"Fetching {name} data...")
-        response = session.get(url)
-        response.raise_for_status()
-        data = response.json()
+        data = _fetch_json_with_fallback(session, url, f"{name} data", driver=driver)
 
         file_path = Path(f"{name}.json")
         with open(file_path, "w", encoding="utf-8") as f:
@@ -132,10 +284,7 @@ def fetch_tree_data(session: requests.Session, profile_id: str) -> None:
 
 def copy_cookies_to_session(driver: webdriver.Chrome) -> requests.Session:
     """Copy cookies from Selenium to requests.Session."""
-    session = requests.Session()
-    for cookie in driver.get_cookies():
-        session.cookies.set(cookie["name"], cookie["value"])
-    return session
+    return _seed_session_cookies(driver)
 
 
 def navigate_to_tree(driver: webdriver.Chrome) -> None:
@@ -157,13 +306,16 @@ def run_scraper(export_dir: Path) -> None:
             profile_id = extract_profile_id(driver)
             print(f"[bold green]Using profile ID:[/bold green] {profile_id}")
 
-            session = create_authenticated_session(driver)
+            session = create_authenticated_session(driver, profile_id)
 
             export_dir.mkdir(parents=True, exist_ok=True)
             for limit in [10]:
-                data = session.get(
-                    f"https://you.23andme.com/p/{profile_id}/family/relatives/ajax/?limit={limit}"
-                ).json()
+                data = _fetch_json_with_fallback(
+                    session,
+                    f"https://you.23andme.com/p/{profile_id}/family/relatives/ajax/?limit={limit}",
+                    f"{limit} relatives",
+                    driver=driver,
+                )
                 (export_dir / f"relatives_{limit}.json").write_text(
                     json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
@@ -172,7 +324,7 @@ def run_scraper(export_dir: Path) -> None:
                 "tree": f"https://you.23andme.com/p/{profile_id}/family/tree/ajax/?health=false",
                 "annotations": f"https://you.23andme.com/p/{profile_id}/family/tree/annotations/"
             }.items():
-                data = session.get(url).json()
+                data = _fetch_json_with_fallback(session, url, f"{name} data", driver=driver)
                 (export_dir / f"{name}.json").write_text(
                     json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
@@ -191,12 +343,11 @@ if __name__ == "__main__":
             profile_id = extract_profile_id(driver)
             print(f"[bold green]Using profile ID:[/bold green] {profile_id}")
 
-            session = create_authenticated_session(driver)
+            session = create_authenticated_session(driver, profile_id)
             for limit in [10, 100, 1500]:
-                fetch_and_save_relatives(session, profile_id, limit)
-            fetch_tree_data(session, profile_id)
+                fetch_and_save_relatives(session, profile_id, limit, driver=driver)
+            fetch_tree_data(session, profile_id, driver=driver)
 
             input("\n[bold cyan]Press Enter to close the browser...[/bold cyan]")
     finally:
         driver.quit()
-
